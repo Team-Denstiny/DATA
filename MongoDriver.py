@@ -177,10 +177,10 @@ class MongoDB:
 
         return True
 
-    def insert_naverInfo_code(self, query):
+    def insert_staticInfo_code(self, query):
         query['_id'] = query['id']
         db = self.client["Hospital"]
-        collections = db['naverInfo']
+        collections = db['staticInfo']
 
         try:
             collections.insert_one(query)
@@ -189,6 +189,26 @@ class MongoDB:
             return False
         except Exception:
             print(f"Key:{query} 알 수 없는 에러..")
+            return False
+
+        return True
+
+    def insert_dynamicInfo_code(self, query):
+        query['_id'] = query['id']
+        db = self.client["Hospital"]
+        collections = db['dynamicInfo']
+
+        query_check = self.read_dynamicInfo_code(nameorid=query['id'])
+        try:
+            if not query_check:
+                collections.insert_one(query)
+            else:
+                collections.update_one( {'id': query['id']}, {'$set': query})
+        except pymongo.errors.DuplicateKeyError:
+            print(f"key:{query} 이미 존재 하므로 pass ...")
+            return False
+        except Exception as e:
+            print(f"Key:{query} 알 수 없는 에러.. as {e}")
             return False
 
         return True
@@ -203,7 +223,7 @@ class MongoDB:
         }
         return self.read_last_one(dbname='Hospital', tablename='dentCode', query=inquery)
 
-    def read_naverInfo_code(self, nameorid):
+    def read_staticInfo_code(self, nameorid):
         nameorid = self.string_converter(nameorid)
         inquery = {
             '$or': [
@@ -211,7 +231,19 @@ class MongoDB:
                 {'id': nameorid}
             ]
         }
-        return self.read_last_one(dbname='Hospital', tablename='naverInfo', query=inquery)
+        return self.read_last_one(dbname='Hospital', tablename='staticInfo', query=inquery)
+
+    def read_dynamicInfo_code(self, nameorid):
+        nameorid = self.string_converter(nameorid)
+        inquery = {
+            '$or': [
+                {'name': {'$regex': nameorid}},
+                {'id': nameorid}
+            ]
+        }
+        return self.read_last_one(dbname='Hospital', tablename='dynamicInfo', query=inquery)
+
+
 
     def read_all_hospital_code(self):
         db = self.client["Hospital"]

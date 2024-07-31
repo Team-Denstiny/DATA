@@ -7,14 +7,43 @@ import json
 import MongoDriver
 import time
 import re
-
+from collections import deque
 
 mongo = MongoDriver.MongoDB()
 excel_df = pd.DataFrame()
 cookie = {'NNB': 'D7R7WEYBRTKGK'}
 header = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Whale/3.27.254.15 Safari/537.36"}
 
+def find_json_path(json_dict: dict, find_key, find_value=None):
+    ''' Json Query 의 key: value의 구체적 경로를 찾아주는 함수
+    :param json_dict:
+    :param find_key:
+    :param find_value:
+    :return:
+    '''
+
+    queue_spool = deque()
+    queue_spool.append((json_dict, ""))
+
+    ## BFS 기반 Query 경로 찾아주는 로직
+    while queue_spool:
+        sub_dict, sub_path = queue_spool.popleft()
+        for key, value in sub_dict.items():
+            if isinstance(value, dict):
+                queue_spool.append((value, f"{sub_path}[{key}]"))
+            elif isinstance(value, list):
+                for i, list_item in enumerate(value):
+                    if isinstance(list_item, dict):
+                        queue_spool.append((list_item, f"{sub_path}[{i}]"))
+
+            if key == find_key and (not find_value or find_value == value):
+                print(f"find! {sub_path}[{find_key}] -> {value}")
+
 def hopital_id(id=19525089):
+    ''' hospital_id 를 받으면 dictionary 로 변환 해주는 함수
+    :param id:
+    :return: dict (JSON 형태)
+    '''
     global header, cookie, session
     url = f"https://pcmap.place.naver.com/hospital/{id}/home"
 
@@ -35,37 +64,61 @@ def hopital_id(id=19525089):
     json_query_str = pas.split(';')[8].strip().split('=', 1)[-1]
 
     try:
-        json_dict = json.loads(json_query_str)
+        return json.loads(json_query_str)
     except json.decoder.JSONDecodeError:
         print(json_query_str)
         print("-----------------------------")
         print(pas)
         return None
-    json_keys = list(json_dict.keys())
 
-    hospi_info_dict_key = ""
-    for item in json_keys:
-        if "PlaceDetailBase" in item:
-            hospi_info_dict_key = item
-            break
-    hospi_info_dict = json_dict[hospi_info_dict_key]
-    sub1_dict = json_dict["ROOT_QUERY"]
-    ret_query = {}
-    ret_query['id'] = id
-    ret_query["name"] = hospi_info_dict["name"]
-    ret_query["road_address"] = hospi_info_dict["roadAddress"]
-    ret_query["telephone"] = hospi_info_dict['phone']
-    ret_query['visitor_score'] = hospi_info_dict['visitorReviewsScore']
+def find_dict_element_similar(json_dict: dict, key_list: list, exact_mode=False):
+    ''' JSON 딕셔너리 원소 추출 함수
+    ex) DICT[ROOT_QUERY][placeDetail({"input":{"deviceType":"mobile","id":"19525089","isNx":false}})][hospitalInfo][1]
+    를 추출해야되면
+    placeDetail(??) 를 추출 해야 되는데 해당 값은 가변 값 이니까.. 유사한 key 를 찾아서 해당 원소를 찾는다.
+    다행히, placeDetail() 과 같은 함수는 2개이상 존재 하지 않기 때문 총총..
 
-    sub1_key = list(sub1_dict.keys())[3]
-    sub2_dict = sub1_dict[sub1_key]
-    sub2_key = list(sub2_dict.keys())[19]
-    try:
-        sub3_dict = sub2_dict[sub2_key][0]
-    except IndexError:
+    :param json_dict: 딕셔너리
+    :param key_list: 키 리스트
+    :return: Object | None
+    '''
+
+    sub_query = json_dict
+
+    for idx in key_list:
+        find_flag = False
+
+        # list 일 때
+        if isinstance(sub_query, list) and isinstance(idx, int) and len(sub_query) > idx:
+            sub_query = sub_query[idx]
+            continue
+
+        if not isinstance(sub_query, dict):
+            return  None
+
+        # dict 일 때
+        for key in sub_query.keys():
+                if (exact_mode and (idx == key)) or (not exact_mode and (idx in key)):
+                    sub_query = sub_query[key]
+                    find_flag = True
+                    break
+
+        if not find_flag:
+            return None
+
+    return sub_query
+
+def get_naver_hospi_runtime(json_dict: dict, ret_query:dict):
+    ''' 네이버 쿼리 기준 병원 시간 탐색
+    :param json_dict:
+    :param ret_query:
+    :return:
+    '''
+
+    final_time_query = find_dict_element_similar(json_dict, ["ROOT_QUERY", "placeDetail", "newBusinessHours", 0, "businessHours"])
+    if not final_time_query:
         return ret_query
 
-    final_time_query = sub3_dict["businessHours"]
     ret_query['timeInfo'] = dict()
     for day_info in final_time_query:
         day = day_info['day']
@@ -88,8 +141,61 @@ def hopital_id(id=19525089):
             "description": description
         }
         ret_query['timeInfo'][day] = mongo_sub_query
+    return ret_query
 
-    time.sleep(0.8)
+def get_naver_hospi_category(json_dict: dict, ret_query:dict):
+    cate = find_dict_element_similar(json_dict, ["ROOT_QUERY", "placeDetail", "hospitalInfo"])
+    if not cate:
+        return  ret_query
+
+    sub_sort = cate["sortedSubjects"]
+    sub_list = list()
+    for each in sub_sort:
+        sub_list.append(each['name'])
+    ret_query['treat_cate'] = sub_list
+    return ret_query
+
+def naver_dent_dict_parser_static(json_dict: dict):
+    ''' 네이버 지도 딕셔너리에서 주요 element를 추출하는 함수. (바뀌지 않는 정보)
+    :param json_dict:
+    :return:
+    '''
+
+    ## print(json.dumps(json_dict, indent=2, ensure_ascii=False))
+    ret_query = {}
+    find_id = find_dict_element_similar(json_dict, ["PlaceDetailBase", "id"])
+    ret_query['id'] = find_id
+    ret_query["name"] = find_dict_element_similar(json_dict, [f'PlaceDetailBase:{find_id}', "name"], exact_mode=True)
+    ret_query["addr"] = find_dict_element_similar(json_dict, ["PlaceDetailBase", "roadAddress"])
+    telephone = find_dict_element_similar(json_dict, ["PlaceDetailBase", "phone"])
+
+    if not telephone:
+        telephone = find_dict_element_similar(json_dict, ["PlaceDetailBase", "virtualPhone"])
+    ret_query["tele"] = telephone
+
+    coord = find_dict_element_similar(json_dict, ['PlaceDetailBase', "coordinate"])
+    if coord:
+        ret_query["lon"] = coord['x']
+        ret_query["lat"] = coord['y']
+    return ret_query
+
+def naver_dent_dict_parser_dynamic(json_dict: dict):
+    ''' 네이버 지도 딕셔너리에서 주요 element를 추출하는 함수. (자주 바뀌는 정보) => Insert가 아닌 update 를 해줘야되는 table 임..
+    :param json_dict:
+    :return:
+    '''
+
+    ret_query = {}
+
+    ##### 가변 데이터 ?
+    find_id = find_dict_element_similar(json_dict, ["PlaceDetailBase", "id"])
+    ret_query['id'] = find_id
+    ret_query["name"] = find_dict_element_similar(json_dict, [f'PlaceDetailBase:{find_id}', "name"], exact_mode=True)
+    ret_query['score'] = find_dict_element_similar(json_dict, ["PlaceDetailBase", "visitorReviewsScore"])
+    ret_query['review_cnt'] = find_dict_element_similar(json_dict, ["PlaceDetailBase", "visitorReviewsTotal"])
+    ret_query = get_naver_hospi_runtime(json_dict, ret_query)
+    ret_query = get_naver_hospi_category(json_dict, ret_query)
+
     return ret_query
 
 def crawl_parser(name, lat, long):
@@ -144,18 +250,45 @@ def procExcel():
 def naverInfo_updater():
     all_ids = mongo.read_all_hospital_code()
     for each in all_ids:
-        exist_check = mongo.read_naverInfo_code(each['id'])
+        exist_check = mongo.read_staticInfo_code(each['id'])
         if exist_check:
             print(f"{each['name']} 데이터 이미 존재 continue...")
             continue
         print(f"{each['name']} update start ...")
-        ret_query = hopital_id(each['id']) # Query 업데이트 시작
-        if not ret_query:
+        ret_dict = hopital_id(each['id']) # Query 업데이트 시작
+
+        if not ret_dict:
             continue
-        mongo.insert_naverInfo_code(ret_query)
+
+        ret_static_query = naver_dent_dict_parser_static(ret_dict)
+        mongo.insert_staticInfo_code(ret_static_query) # 바꿔야함.
+        ret_dynamic_query = naver_dent_dict_parser_dynamic(ret_dict)
+        mongo.insert_dynamicInfo_code(ret_dynamic_query)
+
+        time.sleep(0.5)
 
 if __name__ == "__main__":
     #procExcel()
-    #hopital_id(19525089)
+
+    #dicts = hopital_id(1016812270)
+    #ret_query = naver_dent_dict_parser_static(dicts)
+    #print(ret_query)
+    #print(ret_query)
     #crawl_parser("임플란피아치과의원", 37, 127)
     naverInfo_updater()
+
+
+    ## Json Finder
+
+    def temp():
+        fname = "exam_json.txt"
+        json_dict = None
+        with open(fname, "rt", encoding="UTF8") as f:
+            json_dict = json.load(f)
+
+        find_json_path(json_dict, find_key="coordinate")
+        coord = find_dict_element_similar(json_dict, ['PlaceDetailBase', "coordinate"])
+        ret = naver_dent_dict_parser_static(json_dict)
+        print(ret)
+
+    #temp()
