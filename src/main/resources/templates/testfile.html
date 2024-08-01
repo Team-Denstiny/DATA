@@ -1,0 +1,20 @@
+<table>
+    <thead>
+        <tr>
+            <th>diskInfo</th>
+            <th>product Id</th>
+            <th>path</th>
+            <th>Actree Id</th>
+        </tr>
+    </thead>
+    <tbody>
+        <tr th:each="obj: ${diskData}">
+            <td th:text="${obj.disk}"></td>
+            <td th:text="${obj.id}"></td>
+            <td th:text="${obj.seller}"></td>
+            <td th:text="${obj.name}"></td>
+            <td th:text="${obj.path}"></td>
+            <td th:text="${obj.actree}"></td>
+        </tr>
+    </tbody>
+</table>
