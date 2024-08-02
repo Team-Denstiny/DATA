@@ -243,7 +243,18 @@ class MongoDB:
         }
         return self.read_last_one(dbname='Hospital', tablename='dynamicInfo', query=inquery)
 
+    def read_each_day_off_hospital(self, day=""):
+        query = {f"timeInfo.{day}.description": "휴무"}
+        print(query)
+        queries = self.read(dbname="Hospital", tablename="dynamicInfo", query=query)
+        return queries
 
+    def read_all_day_off_hospital(self):
+        dynamic_fields = ["월", "화", "수", "목", "금", "토", "일"]
+        query = {"$or": [{f"timeInfo.{field}.description": "휴무"} for field in dynamic_fields]}
+        print(query)
+        queries = self.read(dbname="Hospital", tablename="dynamicInfo", query=query)
+        return queries
 
     def read_all_hospital_code(self):
         db = self.client["Hospital"]

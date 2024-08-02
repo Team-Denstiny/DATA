@@ -49,9 +49,8 @@ def hopital_id(id=19525089):
 
     response = requests.get(url, cookies=cookie, headers=header)
     response.encoding = 'utf-8'
-    pas = (bs4.BeautifulSoup(response.text, "html.parser").find_all('script')[2].text.
-           replace("quot;", "").replace("&amp;", "")).replace("&lt;","").replace("&gt;","")
-
+    pas = bs4.BeautifulSoup(response.text, "html.parser").find_all('script')[2].text
+           #replace("quot;", "").replace("&amp;", "")).replace("&lt;","").replace("&gt;","")
 
     #몇 번인지 찾아내기
     '''
@@ -61,8 +60,9 @@ def hopital_id(id=19525089):
         print("-----------------------------------------------")
     '''
 
-    json_query_str = pas.split(';')[8].strip().split('=', 1)[-1]
-
+    start_idx = pas.find("window.__APOLLO_STATE__")
+    end_idx = pas.find("window.__PLACE_STATE__")
+    json_query_str = pas[start_idx: end_idx].split('=', 1)[-1].strip()[:-1]
     try:
         return json.loads(json_query_str)
     except json.decoder.JSONDecodeError:
@@ -121,7 +121,8 @@ def get_naver_hospi_runtime(json_dict: dict, ret_query:dict):
 
     ret_query['timeInfo'] = dict()
     for day_info in final_time_query:
-        day = day_info['day']
+        ## {월, 화, 수, 목, 금, 토, 일} 형태로 한글자만 기록
+        day = day_info['day'][:1]
         bussiness_time_obj = day_info['businessHours']
         breakhours_time_obj = day_info['breakHours']
         description = day_info['description']
@@ -167,16 +168,22 @@ def naver_dent_dict_parser_static(json_dict: dict):
     ret_query['id'] = find_id
     ret_query["name"] = find_dict_element_similar(json_dict, [f'PlaceDetailBase:{find_id}', "name"], exact_mode=True)
     ret_query["addr"] = find_dict_element_similar(json_dict, ["PlaceDetailBase", "roadAddress"])
+    dong_type = find_dict_element_similar(json_dict, ['PlaceDetailBase', "address"])
+    ret_query["dong"] = None
+    if dong_type:
+        ret_query["dong"] = dong_type.split(" ")[0]
+
     telephone = find_dict_element_similar(json_dict, ["PlaceDetailBase", "phone"])
 
     if not telephone:
         telephone = find_dict_element_similar(json_dict, ["PlaceDetailBase", "virtualPhone"])
     ret_query["tele"] = telephone
-
+    ret_query["img"] = find_dict_element_similar(json_dict,
+                                                 ['ROOT_QUERY', "placeDetail", "images", "images", 0, "origin"])
     coord = find_dict_element_similar(json_dict, ['PlaceDetailBase', "coordinate"])
     if coord:
-        ret_query["lon"] = coord['x']
-        ret_query["lat"] = coord['y']
+        ret_query["lon"] = float(coord['x'])
+        ret_query["lat"] = float(coord['y'])
     return ret_query
 
 def naver_dent_dict_parser_dynamic(json_dict: dict):
@@ -267,16 +274,33 @@ def naverInfo_updater():
 
         time.sleep(0.5)
 
+#####TEMPTEMPTEMPTEMPTEMPTEMPTEMPTEMPTEMPTEMPTEMPTEMPTEMPTEMPTEMPTEMPTEMPTEMPTEMPTEMPTEMPTEMPTEMPTEMPTEMPTEMPTEMPTEMPTEMPTEMPTEMPTEMPTEMPTEMPTEMPTEMP####
+def make_review_block():
+    data = mongo.read_all_hospital_code()
+    queries = []
+    for each in data:
+        make_query = {
+            "id": each['id'],
+            "name": each["name"],
+            "review": []
+        }
+        queries.append(make_query)
+        print(make_query)
+    mongo.insert(dbName="Hospital", tableName="review", queryList=queries, primaryKey='id', primaryKeySet=True)
+
+#####TEMPTEMPTEMPTEMPTEMPTEMPTEMPTEMPTEMPTEMPTEMPTEMPTEMPTEMPTEMPTEMPTEMPTEMPTEMPTEMPTEMPTEMPTEMPTEMPTEMPTEMPTEMPTEMPTEMPTEMPTEMPTEMPTEMPTEMPTEMPTEMP####
+
 if __name__ == "__main__":
     #procExcel()
 
-    #dicts = hopital_id(1016812270)
+    #dicts = hopital_id(38747300)
     #ret_query = naver_dent_dict_parser_static(dicts)
     #print(ret_query)
     #print(ret_query)
-    #crawl_parser("임플란피아치과의원", 37, 127)
+    #crawl_parser("새서울치과", 37, 127)
     naverInfo_updater()
 
+    ## 월요일 후무 쿼리 검색 시 --> {"timeInfo.월.description": "휴무"}
 
     ## Json Finder
 
@@ -286,9 +310,23 @@ if __name__ == "__main__":
         with open(fname, "rt", encoding="UTF8") as f:
             json_dict = json.load(f)
 
-        find_json_path(json_dict, find_key="coordinate")
-        coord = find_dict_element_similar(json_dict, ['PlaceDetailBase', "coordinate"])
+        #print(json.dumps(obj=json_dict, indent=2, ensure_ascii=False))
+
+        find_json_path(json_dict, find_key="address", find_value="개포동 167-5")
+
+        dong = find_dict_element_similar(json_dict, ['PlaceDetailBase', "address"])
+        #print(dong)
         ret = naver_dent_dict_parser_static(json_dict)
         print(ret)
-
     #temp()
+    def check_day_off():
+        each_test = mongo.read_each_day_off_hospital("월")
+        for each in each_test:
+            print(f"{each['name']}, {[each['timeInfo'][day]['description'] for day in ['월', '화', '수', '목', '금', '토', '일']]}")
+    def check_day_off_all():
+        each_test = mongo.read_all_day_off_hospital()
+        for each in each_test:
+            print(
+                f"{each['name']}, {[each['timeInfo'][day]['description'] for day in ['월', '화', '수', '목', '금', '토', '일']]}")
+
+
