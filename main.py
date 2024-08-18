@@ -7,7 +7,10 @@ import json
 import MongoDriver
 import time
 import re
+import datetime
 from collections import deque
+import set_category
+from bson import ObjectId
 
 mongo = MongoDriver.MongoDB()
 excel_df = pd.DataFrame()
@@ -116,10 +119,21 @@ def get_naver_hospi_runtime(json_dict: dict, ret_query:dict):
     '''
 
     final_time_query = find_dict_element_similar(json_dict, ["ROOT_QUERY", "placeDetail", "newBusinessHours", 0, "businessHours"])
+    ret_query['timeInfo'] = dict()
+
     if not final_time_query:
+        day = ["월", "화", "수", "목", "금", "토", "일"]
+        for d in day:
+            sub_query = {
+                "day": d,
+                "work_time": ["00:00", "00:00"],
+                "break_time": ["00:00", "00:00"],
+                "description": ""
+            }
+            ret_query['timeInfo'][d] = sub_query
+
         return ret_query
 
-    ret_query['timeInfo'] = dict()
     for day_info in final_time_query:
         ## {월, 화, 수, 목, 금, 토, 일} 형태로 한글자만 기록
         day = day_info['day'][:1]
@@ -146,11 +160,12 @@ def get_naver_hospi_runtime(json_dict: dict, ret_query:dict):
 
 def get_naver_hospi_category(json_dict: dict, ret_query:dict):
     cate = find_dict_element_similar(json_dict, ["ROOT_QUERY", "placeDetail", "hospitalInfo"])
+    ret_query['treat_cate'] = []
     if not cate:
-        return  ret_query
+        return ret_query
 
-    sub_sort = cate["sortedSubjects"]
     sub_list = list()
+    sub_sort = cate["sortedSubjects"]
     for each in sub_sort:
         sub_list.append(each['name'])
     ret_query['treat_cate'] = sub_list
@@ -184,6 +199,24 @@ def naver_dent_dict_parser_static(json_dict: dict):
     if coord:
         ret_query["lon"] = float(coord['x'])
         ret_query["lat"] = float(coord['y'])
+
+    ret_query['subway_info'] = ''
+    ret_query['subway_name'] = ''
+    ret_query['dist'] = 0
+    trans = find_dict_element_similar(json_dict, ['ROOT_QUERY', 'placeDetail', "subwayStations"])
+    #print(json.dumps(obj=json_dict, indent=2, ensure_ascii=False))
+    transSimilar = find_dict_element_similar(json_dict, ['SubwayStationInfo:'])
+    if trans:
+        trans = trans[0]
+        ret_query['subway_info'] = trans['no']
+
+    if transSimilar:
+        ret_query['subway_name'] = transSimilar['name'] + '역'
+        ret_query['dist'] = int(transSimilar['walkingDistance'])
+    elif trans:
+        ret_query['subway_name'] = trans['station']['name'] + '역'
+        ret_query['dist'] = int(trans['station']['walkingDistance'])
+    print(ret_query)
     return ret_query
 
 def naver_dent_dict_parser_dynamic(json_dict: dict):
@@ -202,6 +235,9 @@ def naver_dent_dict_parser_dynamic(json_dict: dict):
     ret_query['review_cnt'] = find_dict_element_similar(json_dict, ["PlaceDetailBase", "visitorReviewsTotal"])
     ret_query = get_naver_hospi_runtime(json_dict, ret_query)
     ret_query = get_naver_hospi_category(json_dict, ret_query)
+    ret_query['review'] = []
+
+    ret_query["treat_cate_easy"] = set_category.get_category_query(query=ret_query)
 
     return ret_query
 
@@ -258,17 +294,16 @@ def naverInfo_updater():
     all_ids = mongo.read_all_hospital_code()
     for each in all_ids:
         exist_check = mongo.read_staticInfo_code(each['id'])
-        if exist_check:
-            print(f"{each['name']} 데이터 이미 존재 continue...")
-            continue
         print(f"{each['name']} update start ...")
         ret_dict = hopital_id(each['id']) # Query 업데이트 시작
-
+        if exist_check:
+            print(f"{each['name']} 데이터 이미 존재 continue...")
+        else:
+            ret_static_query = naver_dent_dict_parser_static(ret_dict)
+            mongo.insert_staticInfo_code(ret_static_query)  # 바꿔야함.
         if not ret_dict:
             continue
 
-        ret_static_query = naver_dent_dict_parser_static(ret_dict)
-        mongo.insert_staticInfo_code(ret_static_query) # 바꿔야함.
         ret_dynamic_query = naver_dent_dict_parser_dynamic(ret_dict)
         mongo.insert_dynamicInfo_code(ret_dynamic_query)
 
@@ -300,24 +335,31 @@ if __name__ == "__main__":
     #crawl_parser("새서울치과", 37, 127)
     naverInfo_updater()
 
+
     ## 월요일 후무 쿼리 검색 시 --> {"timeInfo.월.description": "휴무"}
 
     ## Json Finder
 
     def temp():
+
         fname = "exam_json.txt"
         json_dict = None
         with open(fname, "rt", encoding="UTF8") as f:
             json_dict = json.load(f)
 
-        #print(json.dumps(obj=json_dict, indent=2, ensure_ascii=False))
+        print(json.dumps(obj=json_dict, indent=2, ensure_ascii=False))
 
-        find_json_path(json_dict, find_key="address", find_value="개포동 167-5")
+        find_json_path(json_dict, find_key="SubwayStationInfo")
 
-        dong = find_dict_element_similar(json_dict, ['PlaceDetailBase', "address"])
-        #print(dong)
-        ret = naver_dent_dict_parser_static(json_dict)
-        print(ret)
+        trans = find_dict_element_similar(json_dict, ['ROOT_QUERY', 'placeDetail', "subwayStations"])
+        find_json_path(json_dict, find_key="SubwayStationInfo:1516")
+
+        if trans:
+            trans = trans[0]
+            subway_info = trans['name'] + '선'
+            subway_name = trans['station']['name'] + '역'
+            dist = int(trans['station']['walkingDistance'])
+
     #temp()
     def check_day_off():
         each_test = mongo.read_each_day_off_hospital("월")
@@ -330,3 +372,26 @@ if __name__ == "__main__":
                 f"{each['name']}, {[each['timeInfo'][day]['description'] for day in ['월', '화', '수', '목', '금', '토', '일']]}")
 
 
+
+    def make_comment(comment: "", hospiId="", score=1):
+        review_query = {
+            "nickName": "hihihihi",
+            "hospitalId": hospiId,
+            "date": datetime.datetime.utcnow(),
+            "review_score": score,
+            "user_id": 1,
+            "content":comment
+        }
+        mongo.insert(dbName="Hospital", tableName="review", queryList=[review_query])
+        id1 = mongo.read_dynamicInfo_code(hospiId)
+        that_query = mongo.read_last_one(dbname="Hospital", tablename="review", query={'hospitalId': hospiId})
+
+        if id1:
+            id1["review"] = [that_query['_id']]
+            mongo.replace_one(dbName="Hospital", tableName="dynamicInfo", origin_query={"id":hospiId}, query=id1)
+
+
+    make_comment(comment="봄은 무슨 봄입니까 봄봄입니까?", hospiId="1893859791", score=1)
+    make_comment(comment="좋지 못하네요 나갔으면 좋곘습니다", hospiId="19525089", score=2)
+    make_comment(comment="병원이 강남 편안한 치과인데 전혀 편안하지 않습니다 너무 불안합니다. 선생님이 자꾸 정치성향을 드러냅니다..", hospiId="1016812270", score=3)
+    make_comment(comment="아주 좋습니다 좋아요 너무 좋네요 정말 좋아요 아 좋습니다 좋아요", hospiId="1893859791", score=4)
