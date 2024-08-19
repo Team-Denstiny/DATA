@@ -371,12 +371,10 @@ if __name__ == "__main__":
             print(
                 f"{each['name']}, {[each['timeInfo'][day]['description'] for day in ['월', '화', '수', '목', '금', '토', '일']]}")
 
-
-
     def make_comment(comment: "", hospiId="", score=1):
         review_query = {
             "nickName": "hihihihi",
-            "hospitalId": hospiId,
+            "hospital_id": hospiId,
             "date": datetime.datetime.utcnow(),
             "review_score": score,
             "user_id": 1,
@@ -387,7 +385,7 @@ if __name__ == "__main__":
         that_query = mongo.read_last_one(dbname="Hospital", tablename="review", query={'hospitalId': hospiId})
 
         if id1:
-            id1["review"] = [that_query['_id']]
+            id1["review"][str(that_query)] = that_query['review_score']
             mongo.replace_one(dbName="Hospital", tableName="dynamicInfo", origin_query={"id":hospiId}, query=id1)
 
 
