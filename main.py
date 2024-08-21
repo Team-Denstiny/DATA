@@ -55,6 +55,7 @@ def hopital_id(id=19525089):
     pas = bs4.BeautifulSoup(response.text, "html.parser").find_all('script')[2].text
            #replace("quot;", "").replace("&amp;", "")).replace("&lt;","").replace("&gt;","")
 
+    print(pas)
     #몇 번인지 찾아내기
     '''
     for i, item in enumerate(pas.split(';', maxsplit=9)):
@@ -231,11 +232,9 @@ def naver_dent_dict_parser_dynamic(json_dict: dict):
     find_id = find_dict_element_similar(json_dict, ["PlaceDetailBase", "id"])
     ret_query['id'] = find_id
     ret_query["name"] = find_dict_element_similar(json_dict, [f'PlaceDetailBase:{find_id}', "name"], exact_mode=True)
-    ret_query['score'] = find_dict_element_similar(json_dict, ["PlaceDetailBase", "visitorReviewsScore"])
-    ret_query['review_cnt'] = find_dict_element_similar(json_dict, ["PlaceDetailBase", "visitorReviewsTotal"])
     ret_query = get_naver_hospi_runtime(json_dict, ret_query)
     ret_query = get_naver_hospi_category(json_dict, ret_query)
-    ret_query['review'] = []
+    ret_query['reviews'] = []
 
     ret_query["treat_cate_easy"] = set_category.get_category_query(query=ret_query)
 
@@ -327,13 +326,11 @@ def make_review_block():
 
 if __name__ == "__main__":
     #procExcel()
-
-    #dicts = hopital_id(38747300)
     #ret_query = naver_dent_dict_parser_static(dicts)
     #print(ret_query)
     #print(ret_query)
     #crawl_parser("새서울치과", 37, 127)
-    naverInfo_updater()
+    #naverInfo_updater()
 
 
     ## 월요일 후무 쿼리 검색 시 --> {"timeInfo.월.description": "휴무"}
@@ -370,26 +367,25 @@ if __name__ == "__main__":
         for each in each_test:
             print(
                 f"{each['name']}, {[each['timeInfo'][day]['description'] for day in ['월', '화', '수', '목', '금', '토', '일']]}")
-
-    def make_comment(comment: "", hospiId="", score=1):
+    def make_comment(comment: "", hospiId=""):
         review_query = {
             "nickName": "hihihihi",
             "hospital_id": hospiId,
             "date": datetime.datetime.utcnow(),
-            "review_score": score,
             "user_id": 1,
-            "content":comment
+            "content":comment,
+            "tag": []
         }
         mongo.insert(dbName="Hospital", tableName="review", queryList=[review_query])
         id1 = mongo.read_dynamicInfo_code(hospiId)
-        that_query = mongo.read_last_one(dbname="Hospital", tablename="review", query={'hospitalId': hospiId})
+        that_query = mongo.read_last_one(dbname="Hospital", tablename="review", query={'hospital_id': hospiId})
 
         if id1:
-            id1["review"][str(that_query)] = that_query['review_score']
+            id1["reviews"].append(str(that_query['_id']))
             mongo.replace_one(dbName="Hospital", tableName="dynamicInfo", origin_query={"id":hospiId}, query=id1)
 
 
-    make_comment(comment="봄은 무슨 봄입니까 봄봄입니까?", hospiId="1893859791", score=1)
-    make_comment(comment="좋지 못하네요 나갔으면 좋곘습니다", hospiId="19525089", score=2)
-    make_comment(comment="병원이 강남 편안한 치과인데 전혀 편안하지 않습니다 너무 불안합니다. 선생님이 자꾸 정치성향을 드러냅니다..", hospiId="1016812270", score=3)
-    make_comment(comment="아주 좋습니다 좋아요 너무 좋네요 정말 좋아요 아 좋습니다 좋아요", hospiId="1893859791", score=4)
+    make_comment(comment="봄은 무슨 봄입니까 봄봄입니까?", hospiId="1893859791")
+    make_comment(comment="좋지 못하네요 나갔으면 좋곘습니다", hospiId="19525089")
+    make_comment(comment="병원이 강남 편안한 치과인데 전혀 편안하지 않습니다 너무 불안합니다. 선생님이 자꾸 정치성향을 드러냅니다..", hospiId="1016812270")
+    make_comment(comment="아주 좋습니다 좋아요 너무 좋네요 정말 좋아요 아 좋습니다 좋아요", hospiId="1893859791")
