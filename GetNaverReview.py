@@ -4,6 +4,7 @@ import main
 import requests
 import bs4
 import json
+import time
 import NaverGraphQL
 
 mongo = MongoDriver.MongoDB()
@@ -166,6 +167,7 @@ def updateAllReviews():
     all_code = mongo.read_all_hospital_code()
     for code in all_code:
         getReview(code["id"])
+        time.sleep(0.5)
 
 if __name__ == "__main__":
     updateAllReviews()

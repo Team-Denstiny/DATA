@@ -10,6 +10,7 @@ import re
 import datetime
 from collections import deque
 import set_category
+import PathAlgorithm
 from bson import ObjectId
 
 mongo = MongoDriver.MongoDB()
@@ -55,7 +56,6 @@ def hopital_id(id=19525089):
     pas = bs4.BeautifulSoup(response.text, "html.parser").find_all('script')[2].text
            #replace("quot;", "").replace("&amp;", "")).replace("&lt;","").replace("&gt;","")
 
-    print(pas)
     #몇 번인지 찾아내기
     '''
     for i, item in enumerate(pas.split(';', maxsplit=9)):
@@ -172,7 +172,7 @@ def get_naver_hospi_category(json_dict: dict, ret_query:dict):
     ret_query['treat_cate'] = sub_list
     return ret_query
 
-def naver_dent_dict_parser_static(json_dict: dict):
+def naver_dent_dict_parser_dentist(json_dict: dict):
     ''' 네이버 지도 딕셔너리에서 주요 element를 추출하는 함수. (바뀌지 않는 정보)
     :param json_dict:
     :return:
@@ -189,6 +189,15 @@ def naver_dent_dict_parser_static(json_dict: dict):
     if dong_type:
         ret_query["dong"] = dong_type.split(" ")[0]
 
+    road_addr = ret_query["addr"]
+    gu_info = ""
+    if road_addr:
+        for tkn in road_addr.split(" "):
+            if tkn in PathAlgorithm.gu_dict.keys():
+                gu_info = tkn
+                break
+    ret_query["gu"] = gu_info
+
     telephone = find_dict_element_similar(json_dict, ["PlaceDetailBase", "phone"])
 
     if not telephone:
@@ -197,9 +206,11 @@ def naver_dent_dict_parser_static(json_dict: dict):
     ret_query["img"] = find_dict_element_similar(json_dict,
                                                  ['ROOT_QUERY', "placeDetail", "images", "images", 0, "origin"])
     coord = find_dict_element_similar(json_dict, ['PlaceDetailBase', "coordinate"])
+    ret_query["location"] = {}
+
     if coord:
-        ret_query["lon"] = float(coord['x'])
-        ret_query["lat"] = float(coord['y'])
+        ret_query["location"]["type"] = "Point"
+        ret_query["location"]["coordinates"] = [float(coord['x']), float(coord['y'])]
 
     ret_query['subway_info'] = ''
     ret_query['subway_name'] = ''
@@ -217,10 +228,13 @@ def naver_dent_dict_parser_static(json_dict: dict):
     elif trans:
         ret_query['subway_name'] = trans['station']['name'] + '역'
         ret_query['dist'] = int(trans['station']['walkingDistance'])
+
+    ret_query = get_naver_hospi_runtime(json_dict, ret_query)
+    ret_query = get_naver_hospi_category(json_dict, ret_query)
     print(ret_query)
     return ret_query
 
-def naver_dent_dict_parser_dynamic(json_dict: dict):
+def naver_dent_dict_parser_reviews(json_dict: dict):
     ''' 네이버 지도 딕셔너리에서 주요 element를 추출하는 함수. (자주 바뀌는 정보) => Insert가 아닌 update 를 해줘야되는 table 임..
     :param json_dict:
     :return:
@@ -232,11 +246,9 @@ def naver_dent_dict_parser_dynamic(json_dict: dict):
     find_id = find_dict_element_similar(json_dict, ["PlaceDetailBase", "id"])
     ret_query['id'] = find_id
     ret_query["name"] = find_dict_element_similar(json_dict, [f'PlaceDetailBase:{find_id}', "name"], exact_mode=True)
-    ret_query = get_naver_hospi_runtime(json_dict, ret_query)
-    ret_query = get_naver_hospi_category(json_dict, ret_query)
     ret_query['reviews'] = []
 
-    ret_query["treat_cate_easy"] = set_category.get_category_query(query=ret_query)
+    #ret_query["treat_cate_easy"] = set_category.get_category_query(query=ret_query)
 
     return ret_query
 
@@ -290,21 +302,18 @@ def procExcel():
 
 
 def naverInfo_updater():
+    mongo.___create_location_index___()
     all_ids = mongo.read_all_hospital_code()
     for each in all_ids:
-        exist_check = mongo.read_staticInfo_code(each['id'])
         print(f"{each['name']} update start ...")
         ret_dict = hopital_id(each['id']) # Query 업데이트 시작
-        if exist_check:
-            print(f"{each['name']} 데이터 이미 존재 continue...")
-        else:
-            ret_static_query = naver_dent_dict_parser_static(ret_dict)
-            mongo.insert_staticInfo_code(ret_static_query)  # 바꿔야함.
+        ret_static_query = naver_dent_dict_parser_dentist(ret_dict)
+        mongo.insert_dentistInfo_code(ret_static_query)  # 바꿔야함.
         if not ret_dict:
             continue
 
-        ret_dynamic_query = naver_dent_dict_parser_dynamic(ret_dict)
-        mongo.insert_dynamicInfo_code(ret_dynamic_query)
+        ret_dynamic_query = naver_dent_dict_parser_reviews(ret_dict)
+        mongo.insert_reviewInfo_code(ret_dynamic_query)
 
         time.sleep(0.5)
 
@@ -322,42 +331,8 @@ def make_review_block():
         print(make_query)
     mongo.insert(dbName="Hospital", tableName="review", queryList=queries, primaryKey='id', primaryKeySet=True)
 
-#####TEMPTEMPTEMPTEMPTEMPTEMPTEMPTEMPTEMPTEMPTEMPTEMPTEMPTEMPTEMPTEMPTEMPTEMPTEMPTEMPTEMPTEMPTEMPTEMPTEMPTEMPTEMPTEMPTEMPTEMPTEMPTEMPTEMPTEMPTEMPTEMP####
 
-if __name__ == "__main__":
-    #procExcel()
-    #ret_query = naver_dent_dict_parser_static(dicts)
-    #print(ret_query)
-    #print(ret_query)
-    #crawl_parser("새서울치과", 37, 127)
-    #naverInfo_updater()
-
-
-    ## 월요일 후무 쿼리 검색 시 --> {"timeInfo.월.description": "휴무"}
-
-    ## Json Finder
-
-    def temp():
-
-        fname = "exam_json.txt"
-        json_dict = None
-        with open(fname, "rt", encoding="UTF8") as f:
-            json_dict = json.load(f)
-
-        print(json.dumps(obj=json_dict, indent=2, ensure_ascii=False))
-
-        find_json_path(json_dict, find_key="SubwayStationInfo")
-
-        trans = find_dict_element_similar(json_dict, ['ROOT_QUERY', 'placeDetail', "subwayStations"])
-        find_json_path(json_dict, find_key="SubwayStationInfo:1516")
-
-        if trans:
-            trans = trans[0]
-            subway_info = trans['name'] + '선'
-            subway_name = trans['station']['name'] + '역'
-            dist = int(trans['station']['walkingDistance'])
-
-    #temp()
+def test_set():
     def check_day_off():
         each_test = mongo.read_each_day_off_hospital("월")
         for each in each_test:
@@ -377,15 +352,66 @@ if __name__ == "__main__":
             "tag": []
         }
         mongo.insert(dbName="Hospital", tableName="review", queryList=[review_query])
-        id1 = mongo.read_dynamicInfo_code(hospiId)
+        id1 = mongo.read_reviewInfo_code(hospiId)
         that_query = mongo.read_last_one(dbname="Hospital", tablename="review", query={'hospital_id': hospiId})
 
         if id1:
             id1["reviews"].append(str(that_query['_id']))
-            mongo.replace_one(dbName="Hospital", tableName="dynamicInfo", origin_query={"id":hospiId}, query=id1)
+            mongo.replace_one(dbName="Hospital", tableName="reviewInfo", origin_query={"id":hospiId}, query=id1)
 
 
     make_comment(comment="봄은 무슨 봄입니까 봄봄입니까?", hospiId="1893859791")
     make_comment(comment="좋지 못하네요 나갔으면 좋곘습니다", hospiId="19525089")
     make_comment(comment="병원이 강남 편안한 치과인데 전혀 편안하지 않습니다 너무 불안합니다. 선생님이 자꾸 정치성향을 드러냅니다..", hospiId="1016812270")
     make_comment(comment="아주 좋습니다 좋아요 너무 좋네요 정말 좋아요 아 좋습니다 좋아요", hospiId="1893859791")
+
+
+def make_writer(id):
+    strs = json.dumps(hopital_id(str(id)))
+    with open("exam_json.txt", "w", encoding="UTF8") as f:
+        f.write(strs)
+#####TEMPTEMPTEMPTEMPTEMPTEMPTEMPTEMPTEMPTEMPTEMPTEMPTEMPTEMPTEMPTEMPTEMPTEMPTEMPTEMPTEMPTEMPTEMPTEMPTEMPTEMPTEMPTEMPTEMPTEMPTEMPTEMPTEMPTEMPTEMPTEMP####
+
+if __name__ == "__main__":
+    #procExcel()
+    #ret_query = naver_dent_dict_parser_static(dicts)
+    #print(ret_query)
+    #print(ret_query)
+    #crawl_parser("새서울치과", 37, 127)
+    ##naverInfo_updater()
+    test_set()
+
+    ## 월요일 후무 쿼리 검색 시 --> {"timeInfo.월.description": "휴무"}
+
+    ## Json Finder
+    make_writer(1235932820)
+    def temp():
+
+        fname = "exam_json.txt"
+        json_dict = None
+        with open(fname, "rt", encoding="UTF8") as f:
+            json_dict = json.load(f)
+
+        #print(json.dumps(obj=json_dict, indent=2, ensure_ascii=False))
+
+        find_json_path(json_dict, find_key="SubwayStationInfo")
+
+        trans = find_dict_element_similar(json_dict, ['ROOT_QUERY', 'placeDetail', "subwayStations"])
+        #find_json_path(json_dict, find_key="SubwayStationInfo:1516")
+
+        road_addr = find_dict_element_similar(json_dict, ["PlaceDetailBase", "roadAddress"])
+        gu_info = ""
+        if road_addr:
+            for tkn in road_addr.split(" "):
+                if tkn in PathAlgorithm.gu_dict.keys():
+                    gu_info = tkn
+                    break
+
+        if trans:
+            trans = trans[0]
+            subway_info = trans['name'] + '선'
+            subway_name = trans['station']['name'] + '역'
+            dist = int(trans['station']['walkingDistance'])
+
+    #temp()
+

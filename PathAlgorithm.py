@@ -1,6 +1,6 @@
 from collections import deque
 
-ret_dict = {
+gu_dict = {
     "강서구" : ["구로구", "양천구", "마포구", "은평구"],
     "양천구" : ["강서구","마포구","영등포구","구로구","금천구"],
     "구로구" : ["양천구","강서구","영등포구","동작구","관악구","금천구"],
@@ -30,7 +30,7 @@ ret_dict = {
 
 def search_dist(start, depth=2):
     visited = dict()
-    for idx in ret_dict.keys():
+    for idx in gu_dict.keys():
         visited[idx] = False
     visited[start] = True
 
@@ -39,7 +39,7 @@ def search_dist(start, depth=2):
     ret_gu_list = [start]
     while queue:
         gu, dep = queue.popleft()
-        for other_gu in ret_dict[gu]:
+        for other_gu in gu_dict[gu]:
             if visited[other_gu] or depth <= dep:
                 continue
 

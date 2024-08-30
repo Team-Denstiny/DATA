@@ -193,12 +193,32 @@ class MongoDB:
 
         return True
 
-    def insert_dynamicInfo_code(self, query):
+    def insert_reviewInfo_code(self, query):
         query['_id'] = query['id']
         db = self.client["Hospital"]
-        collections = db['dynamicInfo']
+        collections = db['reviewInfo']
 
-        query_check = self.read_dynamicInfo_code(nameorid=query['id'])
+        query_check = self.read_reviewInfo_code(nameorid=query['id'])
+        try:
+            if not query_check:
+                collections.insert_one(query)
+            else:
+                collections.update_one( {'id': query['id']}, {'$set': query})
+        except pymongo.errors.DuplicateKeyError:
+            print(f"key:{query} 이미 존재 하므로 pass ...")
+            return False
+        except Exception as e:
+            print(f"Key:{query} 알 수 없는 에러.. as {e}")
+            return False
+
+        return True
+
+    def insert_dentistInfo_code(self, query):
+        query['_id'] = query['id']
+        db = self.client["Hospital"]
+        collections = db['dentistInfo']
+
+        query_check = self.read_dentistInfo_code(nameorid=query['id'])
         try:
             if not query_check:
                 collections.insert_one(query)
@@ -223,7 +243,7 @@ class MongoDB:
         }
         return self.read_last_one(dbname='Hospital', tablename='dentCode', query=inquery)
 
-    def read_staticInfo_code(self, nameorid):
+    def read_dentistInfo_code(self, nameorid):
         nameorid = self.string_converter(nameorid)
         inquery = {
             '$or': [
@@ -231,9 +251,9 @@ class MongoDB:
                 {'id': nameorid}
             ]
         }
-        return self.read_last_one(dbname='Hospital', tablename='staticInfo', query=inquery)
+        return self.read_last_one(dbname='Hospital', tablename='dentistInfo', query=inquery)
 
-    def read_dynamicInfo_code(self, nameorid):
+    def read_reviewInfo_code(self, nameorid):
         nameorid = self.string_converter(nameorid)
         inquery = {
             '$or': [
@@ -241,19 +261,19 @@ class MongoDB:
                 {'id': nameorid}
             ]
         }
-        return self.read_last_one(dbname='Hospital', tablename='dynamicInfo', query=inquery)
+        return self.read_last_one(dbname='Hospital', tablename='reviewInfo', query=inquery)
 
     def read_each_day_off_hospital(self, day=""):
         query = {f"timeInfo.{day}.description": "휴무"}
         print(query)
-        queries = self.read(dbname="Hospital", tablename="dynamicInfo", query=query)
+        queries = self.read(dbname="Hospital", tablename="dentistInfo", query=query)
         return queries
 
     def read_all_day_off_hospital(self):
         dynamic_fields = ["월", "화", "수", "목", "금", "토", "일"]
         query = {"$or": [{f"timeInfo.{field}.description": "휴무"} for field in dynamic_fields]}
         print(query)
-        queries = self.read(dbname="Hospital", tablename="dynamicInfo", query=query)
+        queries = self.read(dbname="Hospital", tablename="dentistInfo", query=query)
         return queries
 
     def read_all_hospital_code(self):
@@ -283,14 +303,29 @@ class MongoDB:
         return True
 
 
+    def ___create_location_index___(self, db="Hospital", table="dentistInfo"):
+        client = self.client
+        db = client[db]
+        collection = db[table]
+
+        indexes = collection.index_information()
+        for idx_name, idx_info in indexes.items():
+            if "2dsphere" in idx_name:
+                print(f"{idx_info['key']} 가 이미 존재함.. ")
+                return
+
+        collection.create_index([("location", pymongo.GEOSPHERE)])
+
+
 
 
 if __name__ == "__main__":
     obj = MongoDB()
+    #obj.___create_location_index___()
     #print(obj.read_seller_list())
     #print(obj.insert(dbName="Hospital", tableName="naverinfo", queryList=[{"name": "예시"}]))
 
-    data = obj.read_hospital_code("강남편안한치과의원")
+    #data = obj.read_hospital_code("강남편안한치과의원")
     # DB에 들어가는지 확인..
     #print(obj.read_list_obj("DayInfo", "Info", "", ))
     #print(obj.read("StockCode", "KOSPI",  {"company": "동화약품"}))
